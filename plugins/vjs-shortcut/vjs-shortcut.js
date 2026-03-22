@@ -11,8 +11,8 @@ c - activate/ deactivate captions
 
 // declarations
 let player, framestep;
-let markers = [];
 
+let isWaitingForVideoJs = true;
 wfke("video-js", init);
 
 // get all candidates, find the one that contains "fps"
@@ -27,6 +27,7 @@ const toggleCaptions = () => {
 }
 
 const navMarker = (next = true) => {
+  const markers = player.markers().markers.map((marker) => marker.seconds);
   const curTime = player.currentTime();
   const marker = next
     ? markers.find(marker => marker > curTime)
@@ -74,8 +75,8 @@ function handleKey(evt) {
     evt.preventDefault();
   }
   // Ctrl + ], [ - Jump to next/previous marker
-  else if (key == "]" && evt.ctrlKey && markers.length) navMarker(true);
-  else if (key == "[" && evt.ctrlKey && markers.length) navMarker(false);
+  else if (key == "]" && evt.ctrlKey) navMarker(true);
+  else if (key == "[" && evt.ctrlKey) navMarker(false);
   // slow down playback rate
   else if (key == "<") changePbRate(false);
   // speed up playback rate
@@ -90,14 +91,22 @@ function handleKey(evt) {
 
 // constants
 function init() {
-  player = document.querySelector("video-js").player;
+  isWaitingForVideoJs = false;
+  const playerElement = document.querySelector("video-js");
+  if (playerElement.dataset.vjsInitialized) {
+    return;
+  }
+  playerElement.dataset.vjsInitialized = true;
+  player = playerElement.player;
   player.on("keydown", handleKey);
   // once scene info is loaded, get framerate
   wfke(".scene-file-info", () => framestep = 1 / getFrameRate());
-  // parse markers once they have been added
-  wfke(".vjs-marker, .vjs-marker-range", () => {
-    markers = player.markers().markers.map((marker) => marker.seconds);
-  });
   document.dispatchEvent(new CustomEvent("vjs-shortcut:ready", { "detail": { player } }));
 }
-PluginApi.Event.addEventListener("stash:location", () => wfke("video-js", init))
+
+PluginApi.Event.addEventListener("stash:location", () => {
+  if (!isWaitingForVideoJs) {
+    isWaitingForVideoJs = true;
+    wfke("video-js", init);
+  }
+});
