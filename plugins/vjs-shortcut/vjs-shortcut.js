@@ -1,112 +1,103 @@
+// Adds (most) YouTube keyboard shortcuts (https://support.google.com/youtube/answer/7631406) to VideoJS
 // see README for shortcuts
 
-/*
-// ,. will override stash commands when focused on video
-. - when paused, step forward one frame
-, - when paused, step back one frame
-> - speed up playback rate
-< - slow down playback rate
-c - activate/ deactivate captions
-*/
+let framestep; // duration of 1 frame, in seconds.
 
-// declarations
-let player, framestep;
+function player() {
+  return PluginApi.utils.InteractiveUtils.getPlayer();
+}
 
-let isWaitingForVideoJs = true;
-wfke("video-js", init);
-
-// get all candidates, find the one that contains "fps"
-const getFrameRate = () =>
-  [...document.querySelectorAll(".scene-file-info dd")]
+function getFrameRate() {
+  // get all candidates, find the one that contains "fps"
+  return [...document.querySelectorAll(".scene-file-info dd")]
     .find((candidate) => candidate.innerText.includes("fps"))
     .textContent.split(" ")[0];
+}
 
-const toggleCaptions = () => {
-  const track = player.textTracks().tracks[0];
+function toggleCaptions() {
+  const track = player().textTracks()[0];
   track.mode = track.mode == "showing" ? "hidden" : "showing";
 }
 
-const navMarker = (next = true) => {
-  const markers = player.markers().markers.map((marker) => marker.seconds);
-  const curTime = player.currentTime();
-  const marker = next
-    ? markers.find(marker => marker > curTime)
-    : markers.toReversed().find(marker => marker < curTime-5)
-  if (marker) player.currentTime(marker);
-}
+function navMarker(next = true) {
+  const markersSeconds = player().markers().markers.map((marker) => marker.seconds);
+  const curTime = player().currentTime();
+  const newMarkerSeconds = next
+    ? markersSeconds.find((marker) => marker > curTime)
+    : markersSeconds.toReversed().find((marker) => marker < curTime - 5);
+  if (newMarkerSeconds) player().currentTime(newMarkerSeconds);
+};
 
-const changePbRate = (increase = true) => {
-  // fetch playback rates
-  const rates = player.playbackRates();
-  // get current playback rate
-  const curRate = player.playbackRate();
-  // get index of playback rate to increase or decrease
-  const curRateIdx = rates.findIndex((e) => e == curRate);
-  const incrRate = rates[curRateIdx + 1];
-  const decrRate = rates[curRateIdx - 1];
-  // if increase and is valid, increase
-  // if decrease and is valid, decrease
-  // otherwise do not change
-  const newRate = increase
-    ? (incrRate ?? curRate)
-    : (decrRate ?? curRate);
-  player.playbackRate(newRate);
+function changePbRate(increase = true) {
+  const availableRates = player().playbackRates();
+  const curRateIdx = availableRates.findIndex((e) => e == player().playbackRate());
+  const newRateIndex = increase ? (curRateIdx + 1) : (curRateIdx - 1);
+  if (newRateIndex < 0 || newRateIndex >= availableRates.length){
+    return;
+  }
+  player().playbackRate(availableRates[newRateIndex]);
 };
 
 function handleKey(evt) {
   const key = evt.key;
   // Home | 0 - Seek to start of video
   if (key == "Home" || key == "0") {
-    player.currentTime(0);
+    player().currentTime(0);
     evt.preventDefault();
   }
   // End - Seek to end of video
   else if (key == "End") {
-    player.currentTime(player.duration());
+    player().currentTime(player().duration());
     evt.preventDefault();
   }
   // . - Step forward 1 frame
-  else if (key == "." && player.paused()) {
-    player.currentTime(player.currentTime() + framestep);
+  else if (key == "." && player().paused()) {
+    player().currentTime(player().currentTime() + framestep);
     evt.preventDefault();
   } // , - step backward 1 frame
-  else if (key == "," && player.paused()) {
-    player.currentTime(player.currentTime() - framestep);
+  else if (key == "," && player().paused()) {
+    player().currentTime(player().currentTime() - framestep);
     evt.preventDefault();
   }
   // Ctrl + ], [ - Jump to next/previous marker
-  else if (key == "]" && evt.ctrlKey) navMarker(true);
-  else if (key == "[" && evt.ctrlKey) navMarker(false);
-  // slow down playback rate
-  else if (key == "<") changePbRate(false);
+  else if (key == "]" && evt.ctrlKey) navMarker(/* next= */ true);
+  else if (key == "[" && evt.ctrlKey) navMarker(/* next= */ false);
   // speed up playback rate
-  else if (key == ">") changePbRate(true);
+  else if (key == ">") changePbRate(/* increase= */true);
+  // slow down playback rate
+  else if (key == "<") changePbRate(/* increase= */false);
   // c - toggle captions
   else if (key == "c") toggleCaptions();
   // Shift+N - Jump to next video
-  else if (key == "N" && evt.shiftKey) player.skipButtons().onNext()
+  else if (key == "N" && evt.shiftKey) player().skipButtons().onNext();
   // Shift+P - Jump to previous video
-  else if (key == "P" && evt.shiftKey) player.skipButtons().onPrevious()
+  else if (key == "P" && evt.shiftKey) player().skipButtons().onPrevious();
 }
 
-// constants
-function init() {
-  isWaitingForVideoJs = false;
-  const playerElement = document.querySelector("video-js");
-  if (playerElement.dataset.vjsInitialized) {
-    return;
-  }
-  playerElement.dataset.vjsInitialized = true;
-  player = playerElement.player;
-  player.on("keydown", handleKey);
-  // once scene info is loaded, get framerate
-  wfke(".scene-file-info", () => framestep = 1 / getFrameRate());
-  document.dispatchEvent(new CustomEvent("vjs-shortcut:ready", { "detail": { player } }));
-}
-
-PluginApi.Event.addEventListener("stash:location", () => {
+let isWaitingForVideoJs = false;
+function initAfterVideoJsElementExists() {
   if (!isWaitingForVideoJs) {
     isWaitingForVideoJs = true;
     wfke("video-js", init);
   }
-});
+}
+
+// Registers keydown listener if not already registered, preps to do framerate grab, and dispatches a "vjs-shortcut:ready" event.
+function init() {
+  isWaitingForVideoJs = false;
+  const playerElement = player().el();
+  if (!playerElement.dataset.vjsInitialized){
+    player().on("keydown", handleKey);
+    playerElement.dataset.vjsInitialized = true;
+  }
+  // once scene info is loaded, get framerate
+  wfke(".scene-file-info", () => (framestep = 1 / getFrameRate()));
+  document.dispatchEvent(
+    new CustomEvent("vjs-shortcut:ready", { detail: { player: player() } }),
+  );
+}
+
+// Init upon first video-js element existing
+initAfterVideoJsElementExists();
+// And upon a new video-js element existing after a location change
+PluginApi.Event.addEventListener("stash:location", initAfterVideoJsElementExists);
